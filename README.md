@@ -1,43 +1,45 @@
+**I dont know if this works this will never get updated**
+
 # Twitch Drops Miner
 
 > [!IMPORTANT]
-> **Versão corrigida (fork Asrus21) — outubro de 2026**
+> **Corrected version (fork Asrus21) — October 2026**
 >
-> Entre setembro e outubro de 2026 a Twitch mudou três coisas que quebraram o app original:
+> Between September and October 2026, Twitch changed three things that broke the original app:
 >
-> 1. **Login** — a Twitch passou a recusar o client ID do app Android usado no login
->    (`invalid client`), o que aparecia como o erro `KeyError: 'device_code'`.
->    Agora o app tenta todos os clientes conhecidos (SMARTBOX primeiro) e salva o que
->    funcionou em `settings.json` (`client_type`). Logins antigos que ainda são válidos
->    continuam funcionando, sem precisar logar de novo.
-> 2. **Campanhas** — a lista de campanhas (`ViewerDropsDashboard`) deixou de responder
->    para os clientes que o app consegue usar. Agora o app faz uma **varredura**: lista
->    todos os streams ao vivo com drops ativados na Twitch (em duas passadas), e pergunta
->    aos 3 canais mais assistidos de cada jogo quais drops estão disponíveis para a sua
->    conta. Os jogos encontrados com drops ficam salvos em `drops_games.json` e são
->    procurados de novo nas próximas varreduras. O resultado é reaproveitado por 30 minutos.
-> 3. **Progresso** — o progresso passou a contar só com a "visualização" da playlist
->    do stream (já incluído desta versão em diante).
+> 1. **Login** — Twitch started rejecting the Android app client ID used for login
+>    (`invalid client`), which showed up as the error `KeyError: 'device_code'`.
+>    The app now tries all known clients (SMARTBOX first) and saves the one that
+>    worked to `settings.json` (`client_type`). Older logins that are still valid
+>    keep working, without needing to log in again.
+> 2. **Campaigns** — the campaign list (`ViewerDropsDashboard`) stopped responding
+>    for the clients the app can use. The app now does a **scan**: it lists all
+>    live streams with drops enabled on Twitch (in two passes), and asks the 3 most
+>    watched channels of each game which drops are available for your account.
+>    Games found with drops are saved in `drops_games.json` and are looked up again
+>    on subsequent scans. The result is reused for 30 minutes.
+> 3. **Progress** — progress now only counts the "viewing" of the stream's playlist
+>    (already included from this version on).
 >
-> Além disso, por padrão o app só assiste canais que realmente têm drops disponíveis para
-> a sua conta (`available_drops_check`). Se nenhum canal informar drops, essa checagem é
-> ignorada para não deixar o app parado.
+> Additionally, by default the app only watches channels that actually have drops
+> available for your account (`available_drops_check`). If no channel reports drops,
+> this check is ignored so the app doesn't sit idle.
 >
-> **Como usar esta versão:**
+> **How to use this version:**
 >
-> - Clique em **Login**, abra `twitch.tv/activate` e digite o código mostrado no app.
-> - Espere a varredura terminar (cerca de 30 segundos a 1 minuto). As campanhas
->   encontradas aparecem na aba **Inventory**, e os jogos delas na lista de jogos da aba
->   **Settings**.
-> - Na aba **Settings**, adicione à lista de prioridade os jogos que você quer minerar
->   e clique em **Reload**. Para minerar tudo o que for possível, mude o **Priority Mode**.
-> - Com `--log`, a linha `Campaign discovery:` no `log.txt` mostra quantas campanhas
->   foram encontradas, em quantos canais e jogos.
-> - Vincule sua conta da Twitch às contas dos jogos na
->   [página de campanhas](https://www.twitch.tv/drops/campaigns).
+> - Click **Login**, open `twitch.tv/activate` and enter the code shown in the app.
+> - Wait for the scan to finish (about 30 seconds to 1 minute). The campaigns
+>   found appear in the **Inventory** tab, and their games in the games list of the
+>   **Settings** tab.
+> - In the **Settings** tab, add the games you want to mine to the priority list
+>   and click **Reload**. To mine everything that is possible, change the **Priority Mode**.
+> - With `--log`, the `Campaign discovery:` line in `log.txt` shows how many campaigns
+>   were found, on how many channels and in how many games.
+> - Link your Twitch account to your game accounts on the
+>   [campaigns page](https://www.twitch.tv/drops/campaigns).
 >
-> Novas opções em `settings.json`: `client_type` (padrão `SMARTBOX`) e
-> `campaign_discovery` (padrão `true`).
+> New options in `settings.json`: `client_type` (default `SMARTBOX`) and
+> `campaign_discovery` (default `true`).
 
 This application allows you to AFK mine timed Twitch drops, without having to worry about switching channels when the one you were watching goes offline, claiming the drops, or even receiving the stream data itself. This helps you save on bandwidth and hassle.
 
