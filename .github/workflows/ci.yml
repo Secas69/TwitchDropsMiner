@@ -346,7 +346,7 @@ jobs:
           artifacts: artifacts/*/*
           body: |
             **&gt;just give me the .exe**
-          name: Development build
-          prerelease: true
+          name: V1
+          prerelease: false
           removeArtifacts: true
           tag: dev-build
