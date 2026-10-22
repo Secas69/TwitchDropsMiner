@@ -1,4 +1,16 @@
-**I dont know if this works this will never get updated**
+<h1 align="center">
+<span style="color:#ff4444;">I</span>
+<span style="color:#ff9900;">dont</span>
+<span style="color:#b58900;">know</span>
+<span style="color:#44bb44;">if</span>
+<span style="color:#33bbee;">this</span>
+<span style="color:#4477ff;">works</span>
+<span style="color:#aa44ff;">this</span>
+<span style="color:#ff44aa;">will</span>
+<span style="color:#ff4444;">never</span>
+<span style="color:#ff9900;">get</span>
+<span style="color:#b58900;">updated</span>
+</h1>
 
 # Twitch Drops Miner
 
