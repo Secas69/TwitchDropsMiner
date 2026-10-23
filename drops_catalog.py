@@ -1,5 +1,5 @@
 """
-Hardcoded catalog of games known to have Twitch drops.
+Hardcoded catalog of games for the Settings tab dropdowns.
 
 The catalog pre-populates the "Game name" dropdowns in the Settings tab,
 so games the dynamic drop scan hasn't found yet can still be added to the
@@ -9,6 +9,8 @@ Sources:
 - Active drop campaigns: https://twdrop.de (2026-10-23)
 - Campaigns from July-October 2026: Twitch Summer Drop Fest (blog.twitch.tv),
   publisher announcements, DTF and artgaming campaign roundups.
+- Top 100 most-streamed games: https://www.followercharts.com/games/twitch
+  (2026-10-23, ranked by primary streamers, IRL/non-game categories removed)
 
 Keep game names exactly as they appear as Twitch category names.
 """
@@ -19,7 +21,7 @@ import re
 import unicodedata
 
 CATALOG_VERSION = "2026-10-23"
-CATALOG_SOURCE = "https://twdrop.de + web research (July-October 2026)"
+CATALOG_SOURCE = "https://twdrop.de + web research (July-October 2026) + followercharts.com top 100"
 
 KNOWN_DROPS_GAMES: tuple[str, ...] = (
     # --- games with active drop campaigns (twdrop.de, 2026-10-23) ---
@@ -154,6 +156,70 @@ KNOWN_DROPS_GAMES: tuple[str, ...] = (
     "Tides of Tomorrow",
     "Tom Clancy's The Division 2",
     "The Elder Scrolls Online",
+    # --- top 100 most-streamed games on Twitch (FollowerCharts, 2026-10-23) ---
+    "Age of Empires II",
+    "ARK: Survival Ascended",
+    "Brawl Stars",
+    "Call of Duty: Black Ops 7",
+    "Call of Duty: Black Ops II",
+    "Call of Duty: Warzone",
+    "Casino Jackpot",
+    "Casino Simulator",
+    "Chess",
+    "Clash Royale",
+    "Counter-Strike",
+    "DayZ",
+    "Deadlock",
+    "Destiny 2",
+    "Diablo IV",
+    "Dofus",
+    "Dota 2",
+    "Dungeons & Dragons",
+    "EA Sports FC 26",
+    "Escape from Tarkov",
+    "F1 25",
+    "FINAL FANTASY XIV ONLINE",
+    "Genshin Impact",
+    "Geometry Dash",
+    "Guild Wars 2",
+    "Halo Infinite",
+    "Hearthstone",
+    "Heroes of Might and Magic III: The Restoration of Erathia",
+    # Point-and-Click-Adventure, though also used as a sleep/subathon category
+    "I'm Only Sleeping",
+    "iRacing",
+    "League of Legends: Wild Rift",
+    "Magic: The Gathering",
+    "MapleStory",
+    "Marathon",
+    "Metin2",
+    "Minecraft",
+    "MLB The Show 26",
+    "Mobile Legends: Bang Bang",
+    "Old School RuneScape",
+    "osu!",
+    "Path of Exile 2",
+    "Phasmophobia",
+    "Poker",
+    "Pokémon FireRed/LeafGreen",
+    "Pokémon Trading Card Game",
+    "Project Zomboid",
+    "PUBG MOBILE",
+    "PUBG: BATTLEGROUNDS",
+    "Red Dead Redemption II",
+    "ROBLOX",
+    "Rust",
+    "StarCraft II",
+    "Super Smash Bros. Melee",
+    "Super Smash Bros. Ultimate",
+    "Teamfight Tactics",
+    "TEKKEN 8",
+    "The Elder Scrolls V: Skyrim",
+    "Tibia",
+    "Trackmania",
+    "VRChat",
+    "War Thunder",
+    "Yu-Gi-Oh! Master Duel",
 )
 
 _WS_RE = re.compile(r"\s+")
