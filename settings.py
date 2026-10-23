@@ -6,6 +6,7 @@ from yarl import URL
 
 from utils import json_load, json_save
 from constants import SETTINGS_PATH, DEFAULT_LANG, DEFAULT_CLIENT_TYPE, PriorityMode
+from drops_catalog import CANONICAL_NAMES, game_key
 
 if TYPE_CHECKING:
     from main import ParsedArgs
@@ -72,6 +73,24 @@ class Settings:
 
     def __init__(self, args: ParsedArgs):
         self._settings: SettingsFile = json_load(SETTINGS_PATH, default_settings)
+        # canonicalize stored game names against the drops catalog, so old
+        # name variants (e.g. different capitalization) keep matching the
+        # official Twitch category names; dedupe while preserving order
+        priority: list[str] = []
+        seen: set[str] = set()
+        for name in self._settings["priority"]:
+            if not isinstance(name, str):
+                continue
+            canonical: str = CANONICAL_NAMES.get(game_key(name), name)
+            key: str = game_key(canonical)
+            if key not in seen:
+                seen.add(key)
+                priority.append(canonical)
+        self._settings["priority"] = priority
+        self._settings["exclude"] = {
+            CANONICAL_NAMES.get(game_key(name), name) if isinstance(name, str) else name
+            for name in self._settings["exclude"]
+        }
         self._args: ParsedArgs = args
         self._altered: bool = False
 

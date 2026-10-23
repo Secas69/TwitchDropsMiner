@@ -329,7 +329,7 @@ jobs:
 
       - name: Delete the existing pre-release (if present)
         run: |
-          TAG=dev-build
+          TAG=v2
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release delete "$TAG" --cleanup-tag --yes --repo "$GITHUB_REPOSITORY"
           else
@@ -338,7 +338,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{github.token}}
 
-      - name: Create a new dev build release
+      - name: Create a new release
         uses: ncipollo/release-action@v1
         with:
           allowUpdates: true
@@ -346,7 +346,7 @@ jobs:
           artifacts: artifacts/*/*
           body: |
             **&gt;just give me the .exe**
-          name: V1
+          name: V2
           prerelease: false
           removeArtifacts: true
-          tag: dev-build
+          tag: v2

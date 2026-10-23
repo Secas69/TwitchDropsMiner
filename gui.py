@@ -50,6 +50,8 @@ from constants import (
     State,
     PriorityMode,
 )
+from drops_catalog import CANONICAL_NAMES, KNOWN_DROPS_GAMES, game_key
+
 if sys.platform == "win32":
     from registry import RegistryKey, ValueType, ValueNotFound
 
@@ -1607,7 +1609,9 @@ class SettingsPanel:
                 master, int(self._settings.available_drops_check)
             ),
         }
-        self._game_names: set[str] = set()
+        # seed the game-name dropdowns with the hardcoded drops catalog,
+        # so games not found by the dynamic scan can still be selected
+        self._game_names: set[str] = set(KNOWN_DROPS_GAMES)
         master.rowconfigure(0, weight=1)
         master.columnconfigure(0, weight=1)
         # use a frame to center the content within the tab
@@ -1844,6 +1848,9 @@ class SettingsPanel:
             text=_("gui", "settings", "reload"),
             command=self._manager._twitch.state_change(State.INVENTORY_FETCH),
         ).grid(column=1, row=0)
+        # populate the game-name dropdowns with the known games right away
+        self.update_excluded_choices()
+        self.update_priority_choices()
 
     def clear_selection(self) -> None:
         self._priority_list.selection_clear(0, "end")
@@ -1968,7 +1975,14 @@ class SettingsPanel:
         )
 
     def set_games(self, games: set[Game]) -> None:
-        self._game_names.update(game.name for game in games)
+        for game in games:
+            name: str = game.name
+            # use the catalog's canonical spelling, so a game that is both
+            # dynamically found and hardcoded shows up only once
+            canonical: str = CANONICAL_NAMES.get(game_key(name), name)
+            if canonical != name:
+                self._game_names.discard(name)
+            self._game_names.add(canonical)
         self.update_excluded_choices()
         self.update_priority_choices()
 
@@ -1977,6 +1991,8 @@ class SettingsPanel:
         if not game_name:
             # prevent adding empty strings
             return
+        # use the catalog's canonical spelling, so typed variants don't create duplicates
+        game_name = CANONICAL_NAMES.get(game_key(game_name), game_name)
         self._priority_entry.clear()
         # add it preventing duplicates
         try:
@@ -2048,6 +2064,8 @@ class SettingsPanel:
         if not game_name:
             # prevent adding empty strings
             return
+        # use the catalog's canonical spelling, so typed variants don't create duplicates
+        game_name = CANONICAL_NAMES.get(game_key(game_name), game_name)
         self._exclude_entry.clear()
         if game_name not in self._settings.exclude:
             self._settings.exclude.add(game_name)
