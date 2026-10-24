@@ -122,6 +122,8 @@ WS_TOPICS_LIMIT = 50
 TOPICS_PER_CHANNEL = 2
 MAX_TOPICS = (MAX_WEBSOCKETS * WS_TOPICS_LIMIT) - BASE_TOPICS
 MAX_CHANNELS = MAX_TOPICS // TOPICS_PER_CHANNEL
+# "Allowed Channels: All" campaigns only track this many live channels per game
+NO_ACL_CHANNEL_COUNT = 4
 # Misc
 DEFAULT_LANG = "English"
 # Intervals and Delays
@@ -129,6 +131,8 @@ PING_INTERVAL = timedelta(minutes=3)
 PING_TIMEOUT = timedelta(seconds=10)
 ONLINE_DELAY = timedelta(seconds=120)
 WATCH_INTERVAL = timedelta(seconds=20)
+# minimum delay between two targeted re-scans of the same game
+RESCAN_COOLDOWN = timedelta(minutes=5)
 # Strings
 WINDOW_TITLE = f"Twitch Drops Miner v{__version__} (by DevilXD)"
 # Logging

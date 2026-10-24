@@ -1565,7 +1565,6 @@ class _SettingsVars(TypedDict):
     autostart: IntVar
     dark_mode: IntVar
     language: StringVar
-    priority_mode: StringVar
     tray_notifications: IntVar
     enable_badges_emotes: IntVar
     available_drops_check: IntVar
@@ -1575,32 +1574,15 @@ class SettingsPanel:
     AUTOSTART_NAME: str = "TwitchDropsMiner"
     AUTOSTART_KEY: str = "HKCU/Software/Microsoft/Windows/CurrentVersion/Run"
 
-    @cached_property
-    def PRIORITY_MODES(self) -> dict[PriorityMode, str]:
-        # NOTE: Translation calls have to be deferred here,
-        # to allow changing the language before the settings panel is initialized.
-        return {
-            PriorityMode.PRIORITY_ONLY: _("gui", "settings", "priority_modes", "priority_only"),
-            PriorityMode.ENDING_SOONEST: _("gui", "settings", "priority_modes", "ending_soonest"),
-            PriorityMode.LOW_AVBL_FIRST: _(
-                "gui", "settings", "priority_modes", "low_availability"
-            ),
-        }
-
     def __init__(self, manager: GUIManager, master: ttk.Widget):
         self._manager = manager
         self._settings: Settings = manager._twitch.settings
-        priority_mode = self._settings.priority_mode
-        if priority_mode not in self.PRIORITY_MODES:
-            priority_mode = PriorityMode.PRIORITY_ONLY
-            self._settings.priority_mode = priority_mode
         self._vars: _SettingsVars = {
             "autostart": IntVar(master, 0),
             "language": StringVar(master, _.current),
             "proxy": StringVar(master, str(self._settings.proxy)),
             "tray": IntVar(master, self._settings.autostart_tray),
             "dark_mode": IntVar(master, int(self._settings.dark_mode)),
-            "priority_mode": StringVar(master, self.PRIORITY_MODES[priority_mode]),
             "tray_notifications": IntVar(master, self._settings.tray_notifications),
             "enable_badges_emotes": IntVar(
                 master, int(self._settings.enable_badges_emotes)
@@ -1678,15 +1660,18 @@ class SettingsPanel:
             variable=self._vars["dark_mode"],
             command=self.update_dark_mode,
         ).grid(column=1, row=irow, sticky="w")
+        # the priority mode is fixed, so no dropdown is needed here
         ttk.Label(
             checkboxes_frame, text=_("gui", "settings", "general", "priority_mode")
         ).grid(column=0, row=(irow := irow + 1), sticky="e")
-        SelectCombobox(
+        ttk.Label(
             checkboxes_frame,
-            command=self.priority_mode,
-            textvariable=self._vars["priority_mode"],
-            values=list(self.PRIORITY_MODES.values()),
+            text=_("gui", "settings", "priority_modes", "priority_only"),
         ).grid(column=1, row=irow, sticky="w")
+        ttk.Label(
+            checkboxes_frame,
+            text=_("gui", "settings", "general", "priority_only_note"),
+        ).grid(column=0, row=(irow := irow + 1), columnspan=2, sticky="w")
 
         # proxy frame
         proxy_frame = ttk.Frame(general_center)
@@ -2051,13 +2036,6 @@ class SettingsPanel:
         del self._settings.priority[idx]
         self._settings.alter()
         self.update_priority_choices()
-
-    def priority_mode(self, event: tk.Event[ttk.Combobox]) -> None:
-        mode_name: str = self._vars["priority_mode"].get()
-        for value, name in self.PRIORITY_MODES.items():
-            if mode_name == name:
-                self._settings.priority_mode = value
-                break
 
     def exclude_add(self) -> None:
         game_name: str = self._exclude_entry.get()
@@ -2635,7 +2613,7 @@ class GUIManager:
         s.configure(
             "TCombobox", fieldbackground=fieldbg, background=fieldbg, foreground=fg, arrowcolor=fg
         )
-        # Ensure readability for readonly comboboxes (Language, Priority mode)
+        # Ensure readability for readonly comboboxes (Language)
         s.map(
             "TCombobox",
             foreground=[("readonly", fg), ("disabled", muted)],

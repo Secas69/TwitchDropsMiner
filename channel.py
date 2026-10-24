@@ -161,7 +161,7 @@ class Stream:
 class Channel:
     __slots__ = (
         "_twitch", "_gui_channels", "id", "_login", "_display_name", "_spade_url",
-        "_stream", "_pending_stream_up", "acl_based"
+        "_stream", "_pending_stream_up", "acl_based", "drops_assumed"
     )
 
     def __init__(
@@ -172,6 +172,7 @@ class Channel:
         login: str,
         display_name: str | None = None,
         acl_based: bool = False,
+        drops_assumed: bool = False,
     ):
         self._twitch: Twitch = twitch
         self._gui_channels: ChannelList = twitch.gui.channels
@@ -186,6 +187,10 @@ class Channel:
         # • if we're watching a non-based channel, a based channel going up triggers a switch
         # • not cleaned up unless they're streaming a game we haven't selected
         self.acl_based: bool = acl_based
+        # "Allowed Channels: All" channels fetched through the drops-enabled game
+        # directory: their drops availability is assumed for as long as the channel
+        # stays online with the right game, so no per-channel extra checks are made
+        self.drops_assumed: bool = drops_assumed
 
     @classmethod
     def from_acl(cls, twitch: Twitch, data: JsonType) -> Channel:
@@ -203,7 +208,11 @@ class Channel:
     ) -> Channel:
         channel = data["broadcaster"]
         self = cls(
-            twitch, id=channel["id"], login=channel["login"], display_name=channel["displayName"]
+            twitch,
+            id=channel["id"],
+            login=channel["login"],
+            display_name=channel["displayName"],
+            drops_assumed=drops_enabled,
         )
         self._stream = Stream.from_directory(self, data, drops_enabled=drops_enabled)
         return self
@@ -333,13 +342,6 @@ class Channel:
             for campaign_data in available_drops
         )
 
-    def update_available_drops(self, available_drops: list[JsonType]) -> None:
-        """
-        Sets whether the stream can progress any of our campaigns, from the available drops.
-        """
-        if self._stream is not None:
-            self._stream.drops_enabled = self._check_drops_enabled(available_drops)
-
     def external_update(self, channel_data: JsonType, available_drops: list[JsonType]):
         """
         Update stream information based on data provided externally.
@@ -369,16 +371,21 @@ class Channel:
             return None
         stream = Stream.from_get_stream(self, channel_data)
         if not stream.drops_enabled:
-            try:
-                available_drops_campaigns: JsonType = await self._twitch.gql_request(
-                    GQL_QUERIES["AvailableDrops"].with_variables({"channelID": str(self.id)})
-                )
-            except MinerException:
-                logger.log(CALL, f"AvailableDrops GQL call failed for channel: {self._login}")
+            if self.drops_assumed:
+                # the drops-enabled game directory already listed this channel,
+                # so assume the drops are still available instead of re-checking
+                stream.drops_enabled = True
             else:
-                stream.drops_enabled = self._check_drops_enabled(
-                    available_drops_campaigns["data"]["channel"]["viewerDropCampaigns"] or []
-                )
+                try:
+                    available_drops_campaigns: JsonType = await self._twitch.gql_request(
+                        GQL_QUERIES["AvailableDrops"].with_variables({"channelID": str(self.id)})
+                    )
+                except MinerException:
+                    logger.log(CALL, f"AvailableDrops GQL call failed for channel: {self._login}")
+                else:
+                    stream.drops_enabled = self._check_drops_enabled(
+                        available_drops_campaigns["data"]["channel"]["viewerDropCampaigns"] or []
+                    )
         return stream
 
     async def update_stream(self) -> bool:

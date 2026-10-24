@@ -163,6 +163,7 @@ class GUISettingsGeneral(TypedDict):
     tray_notifications: str
     dark_mode: str
     priority_mode: str
+    priority_only_note: str
     proxy: str
 
 
@@ -379,6 +380,7 @@ default_translation: Translation = {
                 "tray_notifications": "Tray notifications: ",
                 "dark_mode": "Dark mode: ",
                 "priority_mode": "Priority mode: ",
+                "priority_only_note": "This implementation only works with the priority list, sorry",
                 "proxy": "Proxy (requires restart):",
             },
             "advanced": {
@@ -424,20 +426,16 @@ default_translation: Translation = {
                 "1. Login to the application.\n"
                 "2. Ensure your Twitch account is linked to all campaigns "
                 "you're interested in mining.\n"
-                "3. If you're interested in mining everything possible, "
-                "change the Priority Mode to anything other than \"Priority list only\" "
-                "and press on \"Reload\".\n"
-                "4. If you want to mine specific games first, use the \"Priority\" list "
-                "to set up an ordered list of games of your choice. "
-                "Games from the top of the list will be attempted to be mined first, "
+                "3. Use the \"Priority\" list to set up an ordered list "
+                "of the games you want to mine. Games from the top of the list "
+                "will be attempted to be mined first, "
                 "before the ones lower down the list.\n"
-                "5. Keep the \"Priority mode\" selected as \"Priority list only\", "
-                "to avoid mining games that are not on the priority list. "
-                "Or not - it's up to you.\n"
-                "6. Use the \"Exclude\" list to tell the application "
+                "4. The priority mode is fixed to \"Priority list only\", "
+                "so only the games on the \"Priority\" list are mined.\n"
+                "5. Use the \"Exclude\" list to tell the application "
                 "which games should never be mined.\n"
-                "7. Changing the contents of either of the lists, or changing "
-                "the \"Priority mode\", requires you to press on \"Reload\" "
+                "6. Changing the contents of either of the lists "
+                "requires you to press on \"Reload\" "
                 "for the changes to take an effect."
             ),
             "invalidate": {

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import asyncio
 import logging
-from time import time
+from time import time, monotonic
 from copy import deepcopy
 from itertools import chain
 from functools import partial
@@ -49,8 +49,10 @@ from constants import (
     DUMP_PATH,
     COOKIES_PATH,
     MAX_CHANNELS,
+    NO_ACL_CHANNEL_COUNT,
     GQL_QUERIES,
     WATCH_INTERVAL,
+    RESCAN_COOLDOWN,
     State,
     ClientType,
     PriorityMode,
@@ -527,6 +529,10 @@ class Twitch:
         self._drops: dict[str, TimedDrop] = {}
         self._campaigns: dict[str, DropsCampaign] = {}
         self._mnt_triggers: deque[datetime] = deque()
+        # Targeted re-scans for "Allowed Channels: All" games whose last channel is gone:
+        self._pending_rescans: set[Game] = set()  # waiting until the game becomes actively mined
+        self._rescan_now: Game | None = None  # one-shot order, processed by CHANNEL_SWITCH
+        self._rescan_last: dict[Game, float] = {}  # monotonic time of the last attempt
         # NOTE: GQL is pretty volatile and breaks everything if one runs into their rate limit.
         # Do not modify the default, safe values.
         self._qgl_limiter = RateLimiter(capacity=5, window=1)
@@ -633,6 +639,9 @@ class Twitch:
         self._auth_state.clear()
         self.wanted_games.clear()
         self._mnt_triggers.clear()
+        self._pending_rescans.clear()
+        self._rescan_now = None
+        self._rescan_last.clear()
         # wait at least half a second + whatever it takes to complete the closing
         # this allows aiohttp to safely close the session
         await asyncio.sleep(start_time + 0.5 - time())
@@ -798,6 +807,13 @@ class Twitch:
                     ):
                         # non-excluded games with no priority are placed last, below priority ones
                         self.wanted_games.append(game)
+                # drop re-scans of games that aren't wanted anymore
+                self._pending_rescans.intersection_update(self.wanted_games)
+                if self._rescan_now is not None and self._rescan_now not in self.wanted_games:
+                    self._rescan_now = None
+                for game in list(self._rescan_last):
+                    if game not in self.wanted_games:
+                        del self._rescan_last[game]
                 full_cleanup = True
                 self.restart_watching()
                 self.change_state(State.CHANNELS_CLEANUP)
@@ -843,6 +859,9 @@ class Twitch:
                     self.change_state(State.IDLE)
             elif self._state is State.CHANNELS_FETCH:
                 self.gui.status.update(_("gui", "status", "gathering"))
+                # a full scan covers every game, so pending targeted re-scans are redundant
+                self._pending_rescans.clear()
+                self._rescan_now = None
                 # start with all current channels, clear the memory and GUI
                 new_channels: set[Channel] = set(channels.values())
                 channels.clear()
@@ -870,10 +889,13 @@ class Twitch:
                 new_channels.update(acl_channels)
                 for game in no_acl:
                     # for every campaign without an ACL, for it's game,
-                    # add a list of live channels with drops enabled
-                    game_channels = await self.get_live_streams(game, drops_enabled=True)
-                    # only keep the channels that actually have our drops available
-                    await self.check_available_drops(game_channels)
+                    # only track the top live channels by viewers; the drops are
+                    # assumed to be mineable as long as the channel stays online
+                    # and keeps streaming the game
+                    game_channels = await self.get_live_streams(
+                        game, limit=NO_ACL_CHANNEL_COUNT, drops_enabled=True,
+                        sort="VIEWER_COUNT",
+                    )
                     new_channels.update(game_channels)
                 # sort them descending by viewers, by priority and by game priority
                 # NOTE: Viewers sort also ensures ONLINE channels are sorted to the top
@@ -954,6 +976,23 @@ class Twitch:
                 if self.settings.dump:
                     self.gui.close()
                     continue
+                # consume the state change up front, so that a change requested
+                # while the re-scan below is in flight isn't swallowed by the clears
+                # at the end of this branch
+                self._state_change.clear()
+                # run a targeted single-game re-scan before picking the next channel,
+                # so the fresh channels are already candidates for the switch
+                rescan_game, self._rescan_now = self._rescan_now, None
+                if rescan_game is not None:
+                    await self.rescan_game_channels(rescan_game)
+                # a loss noted during the rescan above may have queued another game;
+                # give it one chance to run in the same branch (bounded: each run
+                # records its own cooldown), but only if we're still in this state
+                if self._state is State.CHANNEL_SWITCH:
+                    self._promote_pending_rescans()
+                    if self._rescan_now is not None:
+                        rescan_game, self._rescan_now = self._rescan_now, None
+                        await self.rescan_game_channels(rescan_game)
                 self.gui.status.update(_("gui", "status", "switching"))
                 # Change into the selected channel, stay in the watching channel,
                 # or select a new channel that meets the required conditions
@@ -975,19 +1014,20 @@ class Twitch:
                 if new_watching is not None:
                     # if we have a better switch target - do so
                     self.watch(new_watching)
-                    # break the state change chain by clearing the flag
-                    self._state_change.clear()
                 elif watching_channel is not None and self.can_watch(watching_channel):
                     # otherwise, continue watching what we had before
                     self.gui.status.update(
                         _("status", "watching").format(channel=watching_channel.name)
                     )
-                    # break the state change chain by clearing the flag
-                    self._state_change.clear()
                 else:
                     # not watching anything and there isn't anything to watch either
                     self.print(_("status", "no_channel"))
-                    self.change_state(State.IDLE)
+                    # no other state was requested while we were switching (a
+                    # same-state re-scan request leaves _state unchanged, so
+                    # checking the pending event covers it too)
+                    if (self._state is State.CHANNEL_SWITCH
+                            and not self._state_change.is_set()):
+                        self.change_state(State.IDLE)
                 del new_watching, selected_channel, watching_channel
             elif self._state is State.RESTART:
                 raise ReloadRequest()
@@ -1123,6 +1163,26 @@ class Twitch:
             ):
                 return True
         return False
+
+    def _is_no_acl_game(self, game: Game) -> bool:
+        """
+        Whether the game has an active, earnable "Allowed Channels: All" campaign,
+        i.e. a campaign without a fixed channel list (same condition as CHANNELS_FETCH).
+        """
+        next_hour = datetime.now(timezone.utc) + timedelta(hours=1)
+        return any(
+            campaign.game == game
+            and not campaign.allowed_channels
+            and campaign.can_earn_within(next_hour)
+            for campaign in self.inventory
+        )
+
+    def _has_live_game_channel(self, game: Game) -> bool:
+        """Whether there's a tracked channel that's online and streaming the game."""
+        return any(
+            channel.online and channel.game == game and channel.drops_enabled
+            for channel in self.channels.values()
+        )
 
     def should_switch(self, channel: Channel) -> bool:
         """
@@ -1269,7 +1329,101 @@ class Twitch:
                 if self.should_switch(channel):
                     # ... and we should watch it
                     self.watch(channel)
+        if stream_after is not None:
+            # a usable channel of this game is live again
+            # (went online or switched back to it), no re-scan is needed for it
+            game = stream_after.game
+            if game is not None and self._has_live_game_channel(game):
+                self._pending_rescans.discard(game)
+        self._note_game_channels_lost(channel, stream_before, stream_after)
         channel.display()
+
+    def _note_game_channels_lost(
+        self, channel: Channel, stream_before: Stream | None, stream_after: Stream | None
+    ) -> None:
+        """
+        Notes when the last online channel of an "Allowed Channels: All" game is lost
+        (went offline or switched to a different game), and asks for a targeted
+        re-scan of that game only.
+
+        NOTE: this is called synchronously from the event loop, so it must only
+        set flags and request a state change, not fetch anything itself.
+        """
+        if stream_before is None:
+            # the channel was already offline, nothing was lost
+            return
+        game = stream_before.game
+        if game is None or (stream_after is not None and stream_after.game == game):
+            # only a title/tags update, or the game hasn't changed
+            return
+        if self.channels.get(channel.id) is not channel:
+            # stale object, the cleanup already replaced or removed it
+            return
+        if game not in self.wanted_games or not self._is_no_acl_game(game):
+            # not our concern: other games and fixed-channel (ACL) campaigns
+            return
+        if self._has_live_game_channel(game):
+            # other usable channels of the game are still online
+            return
+        self._pending_rescans.add(game)
+        watching = self.watching_channel.get_with_default(None)
+        if not (
+            watching is None
+            or watching == channel
+            or (watching.game is not None and watching.game == game)
+        ):
+            # another game is being mined right now, the re-scan is deferred
+            # until this game becomes the active one again
+            logger.info(
+                f"All channels of {game.name} are gone, re-scan deferred "
+                f"(currently mining {watching.game.name if watching.game is not None else 'nothing'})"
+            )
+            return
+        in_cooldown = self._in_rescan_cooldown(game)
+        if in_cooldown or self._rescan_now is not None:
+            # avoid request thrashing; the queued re-scan is processed on the
+            # next state change (promoted once the cooldown has passed)
+            logger.info(f"All channels of {game.name} are gone, re-scan queued")
+            return
+        # this game was the actively mined one (or nothing is being mined)
+        self._rescan_now = game
+        logger.info(f"All channels of {game.name} are gone, re-scanning now")
+        # don't clobber a pending reload request (change_state only guards EXIT)
+        if self._state is not State.RESTART:
+            self.change_state(State.CHANNEL_SWITCH)
+
+    def _in_rescan_cooldown(self, game: Game) -> bool:
+        """Whether the game's re-scan rate limit is still in effect."""
+        last = self._rescan_last.get(game)
+        return (last is not None
+                and monotonic() - last < RESCAN_COOLDOWN.total_seconds())
+
+    def _promote_pending_rescans(self) -> None:
+        """Promotes a deferred re-scan once its game is actively mined again."""
+        if not self._pending_rescans:
+            return
+        watching = self.watching_channel.get_with_default(None)
+        active: Game | None = watching.game if watching is not None else None
+        if active is None:
+            # nothing is being mined: the first wanted game without a live
+            # channel and out of cooldown gets it
+            active = next(
+                (game for game in self.wanted_games
+                 if game in self._pending_rescans
+                 and not self._in_rescan_cooldown(game)
+                 and not self._has_live_game_channel(game)),
+                None,
+            )
+        if (
+            self._rescan_now is None
+            and active is not None
+            and active in self._pending_rescans
+        ):
+            if self._in_rescan_cooldown(active):
+                # the cooldown hasn't passed yet, it'll be promoted later
+                return
+            self._pending_rescans.discard(active)
+            self._rescan_now = active
 
     @task_wrapper
     async def process_drops(self, user_id: int, message: JsonType):
@@ -1691,20 +1845,24 @@ class Twitch:
         return None
 
     async def get_live_streams(
-        self, game: Game, *, limit: int = 20, drops_enabled: bool = True
+        self, game: Game, *, limit: int = 20, drops_enabled: bool = True,
+        sort: str | None = None,
     ) -> list[Channel]:
         filters: list[str] = []
         if drops_enabled:
             filters.append("DROPS_ENABLED")
+        options: dict[str, JsonType] = {
+            "includeRestricted": ["SUB_ONLY_LIVE"],
+            "systemFilters": filters,
+        }
+        if sort is not None:
+            options["sort"] = sort
         try:
             response = await self.gql_request(
                 GQL_QUERIES["GameDirectory"].with_variables({
                     "limit": limit,
                     "slug": game.slug,
-                    "options": {
-                        "includeRestricted": ["SUB_ONLY_LIVE"],
-                        "systemFilters": filters,
-                    },
+                    "options": options,
                 })
             )
         except GQLException as exc:
@@ -1718,6 +1876,98 @@ class Twitch:
                 if stream_channel_data["node"]["broadcaster"] is not None
             ]
         return []
+
+    async def rescan_game_channels(self, game: Game) -> None:
+        """
+        Fetches fresh top channels for a single "Allowed Channels: All" game,
+        without disturbing the channels of other games or ACL-based channels.
+
+        NOTE: only the state machine may mutate the channel set and topics, so
+        this must only be awaited from within it.
+        """
+        if self._has_live_game_channel(game) or not self._is_no_acl_game(game):
+            # the situation has already changed (or a full scan ran in the meantime)
+            return
+        self._rescan_last[game] = monotonic()
+        try:
+            game_channels = await self.get_live_streams(
+                game, limit=NO_ACL_CHANNEL_COUNT, drops_enabled=True,
+                sort="VIEWER_COUNT",
+            )
+        except MinerException as exc:
+            logger.warning(f"Re-scan of {game.name} failed: {exc}")
+            # keep it pending, so the next switch attempt retries it
+            self._pending_rescans.add(game)
+            return
+        if not game_channels:
+            # nothing is live right now, retry on the next switch attempt
+            self._pending_rescans.add(game)
+            return
+        logger.info(f"Re-scanned {game.name}: {len(game_channels)} channels found")
+        added_any: bool = False
+        to_add_topics: list[WebsocketTopic] = []
+        for channel in game_channels:
+            existing = self.channels.get(channel.id)
+            if existing is not None:
+                # replace the stale object with the fresh directory data
+                existing.remove()
+                # keep the ACL status, so a fixed-channel campaign channel
+                # doesn't lose its priority/cleanup behavior
+                channel.acl_based = existing.acl_based
+                channel.drops_assumed = existing.drops_assumed
+                channel.display(add=True)
+                if self.watching_channel.get_with_default(None) is existing:
+                    # the stale object was the one being watched - relink it
+                    self.watch(channel, update_status=False)
+                self.channels[channel.id] = channel
+                added_any = True
+                continue
+            if len(self.channels) >= MAX_CHANNELS:
+                # make room by evicting one offline, non-ACL channel
+                if not self._evict_for_rescan():
+                    logger.warning(
+                        f"Channel limit reached, skipping {channel.name} "
+                        f"(re-scan of {game.name})"
+                    )
+                    continue
+            self.channels[channel.id] = channel
+            channel.display(add=True)
+            added_any = True
+            to_add_topics.append(
+                WebsocketTopic("Channel", "StreamState", channel.id, self.process_stream_state)
+            )
+            to_add_topics.append(
+                WebsocketTopic("Channel", "StreamUpdate", channel.id, self.process_stream_update)
+            )
+        if added_any:
+            self._pending_rescans.discard(game)
+        else:
+            # nothing was added (e.g. the channel limit is full), retry later
+            self._pending_rescans.add(game)
+        if to_add_topics:
+            self.websocket.add_topics(to_add_topics)
+
+    def _evict_for_rescan(self) -> bool:
+        """
+        Evicts one offline, non-ACL, non-watching channel to make room for a new one.
+        Returns True on success.
+        """
+        watching = self.watching_channel.get_with_default(None)
+        for channel in self.channels.values():
+            if (
+                channel is not watching
+                and not channel.acl_based
+                # 'offline' excludes channels that just got a stream-up event
+                and channel.offline
+            ):
+                self.websocket.remove_topics([
+                    WebsocketTopic.as_str("Channel", "StreamState", channel.id),
+                    WebsocketTopic.as_str("Channel", "StreamUpdate", channel.id),
+                ])
+                del self.channels[channel.id]
+                channel.remove()
+                return True
+        return False
 
     async def fetch_available_drops(
         self, channel_ids: abc.Iterable[int]
@@ -1744,31 +1994,6 @@ class Twitch:
                         channel_data.get("viewerDropCampaigns") or []
                     )
         return available
-
-    async def check_available_drops(self, channels: list[Channel]) -> None:
-        """
-        Marks which of the channels have drops available for the account.
-
-        The game directory lists channels with drops enabled in general, but watching one
-        that has no drops available for the account doesn't progress anything.
-        If no channel at all reports drops, nothing is changed (fail open).
-        """
-        # discovered campaigns rely on this check to pick the right channels
-        if not (self.settings.available_drops_check or self.settings.campaign_discovery):
-            return
-        online: list[Channel] = [channel for channel in channels if channel.online]
-        if not online:
-            return
-        try:
-            available = await self.fetch_available_drops(channel.id for channel in online)
-        except MinerException as exc:
-            logger.warning(f"Available drops check failed, skipping it: {exc}")
-            return
-        if not any(available.values()):
-            logger.warning("No channel reports any available drops, skipping the check")
-            return
-        for channel in online:
-            channel.update_available_drops(available.get(channel.id, []))
 
     def _campaign_from_available(
         self,

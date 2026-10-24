@@ -91,6 +91,9 @@ class Settings:
             CANONICAL_NAMES.get(game_key(name), name) if isinstance(name, str) else name
             for name in self._settings["exclude"]
         }
+        # the miner currently only works with "Priority list only",
+        # so any older stored value is normalized away on load
+        self._settings["priority_mode"] = PriorityMode.PRIORITY_ONLY
         self._args: ParsedArgs = args
         self._altered: bool = False
 
@@ -109,7 +112,11 @@ class Settings:
         if name in self.PASSTHROUGH:
             # passthrough
             return super().__setattr__(name, value)
-        elif name in self._settings:
+        if name == "priority_mode":
+            # the miner currently only works with "Priority list only",
+            # so no other value can ever reach the settings file
+            value = PriorityMode.PRIORITY_ONLY
+        if name in self._settings:
             self._settings[name] = value  # type: ignore[literal-required]
             self._altered = True
             return

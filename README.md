@@ -33,9 +33,11 @@
 > 3. **Progress** — progress now only counts the "viewing" of the stream's playlist
 >    (already included from this version on).
 >
-> Additionally, by default the app only watches channels that actually have drops
-> available for your account (`available_drops_check`). If no channel reports drops,
-> this check is ignored so the app doesn't sit idle.
+> Additionally, for campaigns with a fixed channel list the app by default only
+> watches channels that actually have drops available for your account
+> (`available_drops_check`). For campaigns where any channel of the game counts
+> ("Allowed Channels: All"), only the top channels by viewers are tracked, and the
+> drops are assumed to be available as long as a channel is online with the game.
 >
 > **How to use this version:**
 >
@@ -44,7 +46,7 @@
 >   found appear in the **Inventory** tab, and their games in the games list of the
 >   **Settings** tab.
 > - In the **Settings** tab, add the games you want to mine to the priority list
->   and click **Reload**. To mine everything that is possible, change the **Priority Mode**.
+>   and click **Reload**.
 > - With `--log`, the `Campaign discovery:` line in `log.txt` shows how many campaigns
 >   were found, on how many channels and in how many games.
 > - Link your Twitch account to your game accounts on the
@@ -75,7 +77,7 @@ Every several seconds, the application pretends to watch a particular stream by 
 - Download and unzip [the latest release](https://github.com/DevilXD/TwitchDropsMiner/releases) - it's recommended to keep it in the folder it comes in.
 - Run it and login/connect the miner to your Twitch account by using the in-app login form.
 - After a successful login, the app should fetch a list of all available campaigns and games you can mine drops for - you can then select and add games of choice to the Priority List available on the Settings tab, and then press on the `Reload` button to start processing. It will fetch a list of all applicable streams it can watch, and start mining right away. You can also manually switch to a different channel as needed.
-- If you wish to keep the miner occupied with mining anything it can, beyond what you've selected via the Priority List, you can use the Priority Mode setting to specify the mining order for the rest of the games.
+- Note that the priority mode is fixed to "Priority list only": only the games on the Priority List are mined, so add any extra games you want to mine to that list.
 - Make sure to link your Twitch account to game accounts on the [campaigns page](https://www.twitch.tv/drops/campaigns), to enable more games to be mined.
 
 ### Pictures:
