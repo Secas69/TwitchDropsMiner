@@ -1867,12 +1867,14 @@ class Twitch:
             )
         except GQLException as exc:
             raise MinerException(f"Game: {game.slug}") from exc
-        if "game" in response["data"]:
+        # a not-found game comes back as null (and isn't a GQL error)
+        game_data: JsonType | None = response["data"].get("game")
+        if game_data is not None:
             return [
                 Channel.from_directory(
                     self, stream_channel_data["node"], drops_enabled=drops_enabled
                 )
-                for stream_channel_data in response["data"]["game"]["streams"]["edges"]
+                for stream_channel_data in game_data["streams"]["edges"]
                 if stream_channel_data["node"]["broadcaster"] is not None
             ]
         return []
@@ -2151,7 +2153,7 @@ class Twitch:
 
     async def _priority_game_channels(self, known: dict[str, JsonType]) -> dict[str, list[JsonType]]:
         """
-        Fallback for the drops scan: the channels of the priority list and in-progress games.
+        The channels of the priority list games and the in-progress ones, asked explicitly.
         """
         games: dict[str, Game] = {}
         for game_name in self.settings.priority:
@@ -2164,8 +2166,10 @@ class Twitch:
         game_channels: dict[str, list[JsonType]] = {}
         for key, game in games.items():
             try:
-                live = await self.get_live_streams(game, limit=DISCOVERY_CHANNELS_PER_GAME)
-            except MinerException:
+                live = await self.get_live_streams(
+                    game, limit=DISCOVERY_CHANNELS_PER_GAME, sort="VIEWER_COUNT"
+                )
+            except (MinerException, KeyError, TypeError, ValueError):
                 logger.warning(f"Campaign discovery: unable to fetch the streams of {game.name}")
                 continue
             game_channels[key] = [
@@ -2174,6 +2178,7 @@ class Twitch:
                     "name": channel._login,
                     "displayName": channel._display_name or channel._login,
                     "gameName": game.name,
+                    "gameSlug": game.slug,
                 }
                 for channel in live
             ]
@@ -2209,9 +2214,16 @@ class Twitch:
         """
         Looks up the channels of games that had drops before, but the scan didn't list.
         """
+        # games already searched are keyed by ID (scan) or by name (priority list)
+        searched_names = {
+            key.removeprefix("name:")
+            for key in game_channels
+            if key.startswith("name:")
+        }
         missing = [
             (game_id, entry) for game_id, entry in remembered.items()
             if game_id not in game_channels
+            and entry["name"].casefold() not in searched_names
         ]
         # the most recently seen first
         missing.sort(key=lambda item: item[1]["seen"], reverse=True)
@@ -2222,7 +2234,7 @@ class Twitch:
             game = Game(game_data)
             try:
                 live = await self.get_live_streams(game, limit=DISCOVERY_CHANNELS_PER_GAME)
-            except MinerException:
+            except (MinerException, KeyError, TypeError, ValueError):
                 continue
             if live:
                 game_channels[game_id] = [
@@ -2256,8 +2268,41 @@ class Twitch:
         try:
             game_channels = await self.scan_drops_streams()
         except (MinerException, KeyError, TypeError, ValueError) as exc:
-            logger.warning(f"{exc} - searching the priority list games only")
-            game_channels = await self._priority_game_channels(known)
+            logger.warning(f"{exc} - the priority list games will still be searched")
+            game_channels = {}
+        # the priority list games (and the in-progress ones) are always searched
+        # explicitly, so their campaigns are found even when the scan doesn't
+        # list a game (or failed); when the scan knows a game, its key (the
+        # game ID) and its channel data are kept, and only channels the scan
+        # missed are appended to it
+        name_to_scan_key: dict[str, str] = {}
+        for scan_key, scan_channels in game_channels.items():
+            for scan_channel in scan_channels:
+                name = (scan_channel.get("gameName") or "").casefold()
+                if name:
+                    name_to_scan_key.setdefault(name, scan_key)
+        try:
+            priority_channels = await self._priority_game_channels(known)
+        except (MinerException, KeyError, TypeError, ValueError) as exc:
+            logger.warning(f"Priority list search failed: {exc}")
+            priority_channels = {}
+        for key, channels in priority_channels.items():
+            if not channels:
+                # nothing is live, the remembered-games lookup can still find it
+                continue
+            scan_key = name_to_scan_key.get(key)
+            if scan_key is None:
+                # the scan doesn't know this game, it gets its own (name) key;
+                # the prefix keeps a purely numeric game name from colliding
+                # with a scan game ID
+                game_channels[f"name:{key}"] = channels
+                continue
+            existing = game_channels[scan_key]
+            seen_ids = {c["id"] for c in existing}
+            game_channels[scan_key] = [
+                *existing,
+                *(c for c in channels if c["id"] not in seen_ids),
+            ]
         remembered: JsonType = self._load_drops_games()
         await self._add_remembered_games(game_channels, remembered)
         excluded: set[str] = {name.casefold() for name in self.settings.exclude}
